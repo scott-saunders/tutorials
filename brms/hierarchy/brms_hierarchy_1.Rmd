@@ -23,6 +23,20 @@ library(DiagrammeR)
 
 knitr::opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE, echo = TRUE, message=FALSE, warning=FALSE, fig.align="center")
 
+theme_set(
+  theme_classic( ) %+replace% 
+    theme(
+      axis.text = element_text( size=10),
+      axis.title=element_text(size=12),
+      strip.text = element_text(size = 12),
+      strip.background = element_blank(),
+      legend.background = element_blank(),
+      legend.title=element_text(size=12),
+      legend.text=element_text(size=10),
+      legend.text.align=0
+    )
+)
+
 ```
 
 *****
@@ -53,14 +67,18 @@ create_graph() %>%
 
 This type of hierarchy could apply to many different scenarios. For example, data from biological triplicates collected on three different days or three parallel cultures from three clonal colonies. In all of these scenarios there is a parameter that you are trying to estimate that should determine the values you measure within each of your groups.
 
-At this point you may be asking yourself, "What is the advantage of modeling the hierarchy vs. pooling all the values?" We will walk through some specific examples, but consider the following hierarchy:
+At this point you may be asking yourself, "What is the advantage of modeling the hierarchy vs. pooling all the values?" We will walk through some specific examples, but consider the asymmetric hierarchy in the next section. What would pooling all of the values would do in that scenario. It would bias our estimate of the true value to sample 3. We could balance this by throwing away observations...but instead we could just take the hierarchical structure into account. 
+
+## Imagine how the data were *Generated*
+
+In order to understand the parameter estimates we are going to get from our hierarchical analysis, we need to think about how the model is getting from the "True Value" to the observed values at bottom of the hierarchy. In many cases, we are simply trying to estimate the mean value of some phenomenon, and in many cases we can reasonably assume that the data were generated from a *Normal* probability distribution (i.e. Bell curve or Gaussian). Therefore we might have a hierarchy that looks like this:
 
 ```{r echo = F}
 
 create_graph() %>% 
-  add_node(label = 'True Value') %>% 
+  add_node(label = '\n\nTrue Value\n\nNormal(mean = True Value, sd = a)') %>% 
   select_last_nodes_created() %>% 
-  add_n_nodes_ws(n = 3, direction = 'from', label = c('sample 1', 'sample 2', 'sample 3')) %>% 
+  add_n_nodes_ws(n = 3, direction = 'from', label = c('\n\n\n\nsample 1\n\nNormal(\nmean = sample 1,\nsd = b)', '\n\nsample 2\n\nNormal(mean = sample 2, sd = b)', '\n\nsample 3\n\nNormal(mean = sample 3, sd = b)')) %>% 
   deselect_nodes(nodes = 1) %>% 
   select_nodes_by_degree(expressions = "deg==1") %>% 
   add_n_nodes_ws(n = 2, direction = 'from', label = c('val 1', 'val 2')) %>% 
@@ -71,11 +89,27 @@ create_graph() %>%
 
 ```
 
-Consider what pooling all of the values would do in this scenario. It would bias our estimate of the true value to sample 3. We could avoid this by throwing away two of the sample 3 values...but instead we could just take the hierarchical structure into account. 
+Here you can see that we started with a True Value and use that as the mean of a normal distribution. We drew our three samples from that distribution. Then we created normal distributions using each of the three samples as the mean and we drew the observed values from each of those distributions. So, what parameters would a model for this hierarchy estimate?
 
-[Add some thoughts about generative modeling / probability distributions]
+1. Mean True Value
+2. Standard deviation between True value and samples ("a")
+3. Mean for each sample (sample 1, sample 2, sample 3)
+4. Standard deviation between samples and observed values ("b")
 
-# A simple setup
+We could rewrite this model in shorthand like this: 
+
+$$Sample \sim Normal(\text{True Value}, a)$$
+$$Vals \sim Normal(Sample, b)$$
+
+Often, you may only be interested in the "True Value," but inherently the hierarchical model will explicit estimate all of the parameters...which could always prove useful. Ok, now let's try to fit a model to a dataset that conforms to the hierarchy shown above.  
+
+******
+
+# My first hierarchical model
+
+Before we jump in let's setup `brms`.
+
+## A simple setup
 
 To perform this example, all you need is to have `R` installed and running and type `install.packages('brms')`. That's it - with that one command you should have all the complicated dependencies etc needed to do hierarchical bayesian statistics...pretty cool.
 
@@ -87,11 +121,13 @@ library(brms)
 
 Good job - setup complete!
 
-# My first hierarchical model
+## Generate data
 
 The first thing we need to fit our model is some data. Let's generate some data that looks like the asymetrical hierarchy shown above.
 
 ```{r}
+set.seed(1)
+
 df <- tibble(
   sample_id = c(1, 2, 3),
   sample_param = rnorm(n = 3, mean = 10, sd = 2)
@@ -107,22 +143,44 @@ df <- tibble(
 df %>% kable() %>% kable_styling()
 ```
 
+Ok, so we have our small dataset here, that we've generated from normal distributions as shown above. Note that in this case the "True Value" was 10. Here's what the dataset looks like graphically:
 
 ```{r}
 ggplot(df, aes(x = factor(sample_id), y = obs_val)) + 
   geom_hline(yintercept = 10, linetype = 2, color = 'gray') + 
-  geom_jitter(height = 0, width = 0.1, shape = 21) 
+  geom_point(shape = 21) +
+  geom_point(aes(y = sample_param), size = 3) + 
+  labs(y = 'Value', x = 'Sample ID')
 ```
 
+You can see the true value as the dotted line. The Sample mean parameters are the filled circles and the observed values are the open circles. Now let's give `brms` only the observed values and see how it does. 
+
+The function we will use is just called `brm()` and the hardest thing we need to provide is the "formula". This will be an `R` style formula and may not be familiar to people, but don't worry about it for now. 
+
+Our formula is simply `obs_val ~ 1`. This means the observed value depends only on an "intercept" - in this case the intercept is just the mean value and specifically it's the "True Value". The hierarchy is added to the model with `obs_val ~ 1 + (1 | sample_id)`. This syntax can be translated to (parameter | group), so in this case the intercept is also grouped by sample_id - each sample has a mean. Finally, the function `brm` actually defaults that the observed data comes from a normal distribution, so we don't even need to define that level of the hierarchy.
+
+Let's try it! Warning: this code may take a minute to run. 
+
 ```{r}
-mod_1 <- brm(formula = obs_val~1 + (1|sample_id), data = df)
+
+mod_1 <- brm(formula = obs_val~1 + (1|sample_id), data = df, file = 'mod_1')
+
+mod_1
 
 ```
-```{r}
 
-#summary(mod_1)
+Woah! A lot just happened there. You should see a bunch of output talking about chains and iterations. That output comes from the `Stan` language that underlies what we are doing with `brms`. `Stan` must be compiled, so that often takes ~1min, but it's worth it. To fit these models is computationally challenging, and `Stan` is implemented to run as fast as possible...so just sit back and relax. 
+
+Now - what just happened? Stan basically just uncovered what the probability distribution was for each parameter by sampling a bunch of times and checking how close it was to explaining the data. We can see this sampling process from the chains:
+
+```{r}
 
 plot(mod_1)
+
 ```
+
+On the right you should see the paths that each of the four chains is taking through this probability space as it tries to find the best fit for your data. We can then look at the distributions of these sampled values on the left. The parameters displayed here are "b Intercept", that's our "True Value". Then there's "sd sample id Intercept" that's our sd = a. Then there's 'sigma' which is our sd = b.
+
+These plots on the left are called 'posterior distributions' and they are the probability estimates for our parameters. Let's look at a summary of the model:
 
 
