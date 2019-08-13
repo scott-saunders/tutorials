@@ -1,0 +1,128 @@
+---
+title: "Brms Hierarchy 1"
+subtitle: "First Draft"
+fontsize: 12pt
+date: '08_12_19 '
+output:
+  html_document:
+    code_folding: show
+    self_contained: no
+    toc: yes
+  pdf_document:
+    toc: yes
+  github_document:
+    pandoc_args: --webtex
+---
+
+```{r setup, echo=F, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(viridis)
+library(knitr)
+library(kableExtra)
+library(DiagrammeR)
+
+knitr::opts_chunk$set(tidy.opts=list(width.cutoff=60),tidy=TRUE, echo = TRUE, message=FALSE, warning=FALSE, fig.align="center")
+
+```
+
+*****
+
+# Welcome!
+
+In this notebook we are going to learn a little bit about `Brms`, which is a package written for `R`. `Brms` can do a lot...it is essentially a wrapper for a sophisticated C style language called `Stan` to perform Bayesian inference. Many of those words may have just scared you, but take a deep breath and read on! 
+
+My goal in writing this tutorial is to give people a few simple examples to get started performing statistics on hierarchical data. To be a pro at this stuff requires serious dedication, and honestly, we all just want it to be easy! Here I'll try to do just that - give you enough to get your answer, but no more...no theory, just the simplest version of the ideas you need to know to perform this kind of analysis. Disclaimer: I'm no expert either, so we're learning together. I think my novice level may help me reach people at the same level, but that also means I have a lot left to learn. Please understand, and let me know how I can improve!
+
+## Biological data tends to be hierarchical
+
+You may find yourself here because you've already realized your data has a hierarchy. It's probably true, because tons of data we collect in biology is naturally hierarchical. Let's start with a simple example - you acquire data on biological triplicates where each biological sample is measured three times (technical triplicate), so you have 9 datapoints in a hierarchy. 
+
+
+```{r echo = F}
+
+create_graph() %>% 
+  add_node(label = 'True Value') %>% 
+  select_last_nodes_created() %>% 
+  add_n_nodes_ws(n = 3, direction = 'from', label = c('sample 1', 'sample 2', 'sample 3')) %>% 
+  deselect_nodes(nodes = 1) %>% 
+  select_nodes_by_degree(expressions = "deg==1") %>% 
+  add_n_nodes_ws(n = 3, direction = 'from', label = c('val 1', 'val 2', 'val 3')) %>% 
+  render_graph(layout = "tree")
+
+```
+
+This type of hierarchy could apply to many different scenarios. For example, data from biological triplicates collected on three different days or three parallel cultures from three clonal colonies. In all of these scenarios there is a parameter that you are trying to estimate that should determine the values you measure within each of your groups.
+
+At this point you may be asking yourself, "What is the advantage of modeling the hierarchy vs. pooling all the values?" We will walk through some specific examples, but consider the following hierarchy:
+
+```{r echo = F}
+
+create_graph() %>% 
+  add_node(label = 'True Value') %>% 
+  select_last_nodes_created() %>% 
+  add_n_nodes_ws(n = 3, direction = 'from', label = c('sample 1', 'sample 2', 'sample 3')) %>% 
+  deselect_nodes(nodes = 1) %>% 
+  select_nodes_by_degree(expressions = "deg==1") %>% 
+  add_n_nodes_ws(n = 2, direction = 'from', label = c('val 1', 'val 2')) %>% 
+  deselect_nodes(nodes = 2:4) %>% 
+  select_nodes_by_id(nodes = 4) %>% 
+  add_n_nodes_ws(n = 2, direction = 'from', label = c('val 3', 'val 4' )) %>%
+  render_graph(layout = "tree")
+
+```
+
+Consider what pooling all of the values would do in this scenario. It would bias our estimate of the true value to sample 3. We could avoid this by throwing away two of the sample 3 values...but instead we could just take the hierarchical structure into account. 
+
+[Add some thoughts about generative modeling / probability distributions]
+
+# A simple setup
+
+To perform this example, all you need is to have `R` installed and running and type `install.packages('brms')`. That's it - with that one command you should have all the complicated dependencies etc needed to do hierarchical bayesian statistics...pretty cool.
+
+Ok, so then we just need to tell `R` that we're going to use `brms`:
+
+```{r}
+library(brms)
+```
+
+Good job - setup complete!
+
+# My first hierarchical model
+
+The first thing we need to fit our model is some data. Let's generate some data that looks like the asymetrical hierarchy shown above.
+
+```{r}
+df <- tibble(
+  sample_id = c(1, 2, 3),
+  sample_param = rnorm(n = 3, mean = 10, sd = 2)
+) %>% 
+  group_by(sample_id) %>% 
+  mutate(obs_1 = rnorm(n=1, mean = sample_param, sd = 1)) %>% 
+  mutate(obs_2 = rnorm(n=1, mean = sample_param, sd = 1)) %>% 
+  mutate(obs_3 = if(sample_id==3) rnorm(n=1, mean = sample_param, sd = 1)) %>% 
+  mutate(obs_4 = if(sample_id==3) rnorm(n=1, mean = sample_param, sd = 1)) %>% 
+  gather(key = obs_num, value = obs_val, obs_1, obs_2, obs_3, obs_4) %>% 
+  drop_na()
+
+df %>% kable() %>% kable_styling()
+```
+
+
+```{r}
+ggplot(df, aes(x = factor(sample_id), y = obs_val)) + 
+  geom_hline(yintercept = 10, linetype = 2, color = 'gray') + 
+  geom_jitter(height = 0, width = 0.1, shape = 21) 
+```
+
+```{r}
+mod_1 <- brm(formula = obs_val~1 + (1|sample_id), data = df)
+
+```
+```{r}
+
+#summary(mod_1)
+
+plot(mod_1)
+```
+
+
