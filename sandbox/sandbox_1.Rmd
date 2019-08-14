@@ -1,0 +1,13 @@
+---
+title: "Leaflet Test"
+output: html_document
+---
+
+
+```{r}
+library(leaflet)
+leaflet() %>% 
+  addTiles() 
+```
+
+

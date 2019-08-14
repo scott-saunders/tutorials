@@ -184,3 +184,4 @@ On the right you should see the paths that each of the four chains is taking thr
 These plots on the left are called 'posterior distributions' and they are the probability estimates for our parameters. Let's look at a summary of the model:
 
 
+
