@@ -183,4 +183,24 @@ On the right you should see the paths that each of the four chains is taking thr
 
 These plots on the left are called 'posterior distributions' and they are the probability estimates for our parameters. Let's look at a summary of the model:
 
+# Compare to pooled data
 
+```{r}
+mod_2 <- brm(formula = obs_val~1, data = df, file = 'mod_2')
+
+mod_2
+```
+
+```{r}
+library(ggridges)
+
+df_post <- bind_rows(
+  rt.scaled(n = 4000, df = 3,mean = 0, sd = 10) %>% as_tibble() %>%  mutate(hier = 'Prior'),
+  posterior_samples(mod_1)$b_Intercept %>% as_tibble() %>% mutate(hier = '1 Level'),
+  posterior_samples(mod_2)$b_Intercept %>% as_tibble() %>% mutate(hier = '0 Levels')
+)
+
+ggplot(df_post, aes(x = value, y = hier)) + 
+  geom_vline(xintercept = 10, linetype = 2)+
+  geom_density_ridges(jittered_points = T,quantile_lines = T, quantiles = c(0.05,0.5,0.95), position = 'raincloud', point_alpha = 0.01) + xlim(0,20)
+```
